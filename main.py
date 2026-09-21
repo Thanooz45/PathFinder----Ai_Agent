@@ -346,19 +346,23 @@ async def search(request: SearchRequest):
     global search_count
     skill = clean_text(request.skill, 100)
     location = clean_text(request.location, 100)
-    advice = await generate_advice(
-        skill,
-        location,
-        request.experience_level,
-        clean_text(request.resume_text),
-    )
-    jobs = await fetch_jobs(
-        skill,
-        location,
-        request.employment_types,
-        request.work_modes,
-        request.experience_level,
-        request.minimum_pay,
+    # These requests are independent. Running them together makes a mobile
+    # search feel much faster, especially when the AI provider is slow.
+    advice, jobs = await asyncio.gather(
+        generate_advice(
+            skill,
+            location,
+            request.experience_level,
+            clean_text(request.resume_text),
+        ),
+        fetch_jobs(
+            skill,
+            location,
+            request.employment_types,
+            request.work_modes,
+            request.experience_level,
+            request.minimum_pay,
+        ),
     )
     async with search_count_lock:
         search_count += 1

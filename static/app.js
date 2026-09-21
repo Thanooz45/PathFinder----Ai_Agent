@@ -159,10 +159,13 @@ function renderResults(data) {
         .join("")
     : '<p class="empty">No matching live vacancies were returned. Try another location or broaden your filters.</p>';
 
-  document.querySelector("#results").hidden = false;
-  document
-    .querySelector("#results")
-    .scrollIntoView({ behavior: "smooth", block: "start" });
+  const results = document.querySelector("#results");
+  results.hidden = false;
+  // On phones, the career brief can be much taller than the viewport. Put the
+  // first live role in view instead of making users hunt below that brief.
+  const mobile = window.matchMedia("(max-width: 780px)").matches;
+  const destination = mobile && data.jobs.length ? jobs.closest("article") : results;
+  destination.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function setChatOpen(open) {
