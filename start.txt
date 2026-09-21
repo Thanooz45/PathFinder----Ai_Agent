@@ -1,0 +1,89 @@
+PATHFINDER CAREER AI — START AND DEPLOY GUIDE
+==============================================
+
+1. RUN LOCALLY (WINDOWS / POWERSHELL)
+-------------------------------------
+Open PowerShell in this project folder, then run:
+
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  pip install -r requirements.txt
+  Copy-Item .env.example .env
+
+Open .env and enter your keys:
+
+  GEMINI_API_KEY=your_google_ai_studio_key
+  RAPIDAPI_KEY=your_rapidapi_key
+
+GEMINI_API_KEY enables AI career guidance and the chatbot.
+RAPIDAPI_KEY is optional, but enables live JSearch job listings.
+
+Start the app:
+
+  uvicorn main:app --reload
+
+Open http://127.0.0.1:8000 in your browser.
+Stop the server with Ctrl+C.
+
+
+2. PUBLISH TO GITHUB
+--------------------
+Never upload your .env file: it contains secret API keys and is already ignored.
+
+1. Create a new empty repository on https://github.com (for example,
+   pathfinder-career-ai). Do not add a README or .gitignore there.
+2. Run these commands from this project folder, replacing YOUR_USERNAME:
+
+  git init
+  git add .
+  git commit -m "Prepare Pathfinder Career AI for deployment"
+  git branch -M main
+  git remote add origin https://github.com/YOUR_USERNAME/pathfinder-career-ai.git
+  git push -u origin main
+
+Before committing, check that .env is not in the staged files:
+
+  git status
+
+
+3. DEPLOY TO RENDER (RECOMMENDED)
+---------------------------------
+Render is recommended because this is a FastAPI server, not just a static site.
+The included render.yaml supplies the install command, server command, health
+check, and secret variable names.
+
+1. Go to https://render.com and sign in with GitHub.
+2. Select New +, then Blueprint.
+3. Select the GitHub repository you pushed above.
+4. Render detects render.yaml. Review the service name and click Apply.
+5. Open the Environment section for the created service and set:
+
+   GEMINI_API_KEY = your real Gemini key
+   RAPIDAPI_KEY = your real RapidAPI key (optional)
+
+6. Deploy. When the deployment is live, open the generated https://...onrender.com
+   URL. The /health URL should return {"status":"ok"}.
+
+Render free services may sleep when unused, so the first request after inactivity
+can take a short time. The search counter is stored locally by the application;
+on free/ephemeral hosting it can reset after a redeploy or restart. Use a database
+if a permanent shared counter is required.
+
+
+4. ABOUT VERCEL
+---------------
+Do not deploy this complete project to Vercel as-is. Vercel is excellent for
+static frontends and serverless functions, but Render directly runs this FastAPI
+application with the existing uvicorn command. You can later host a separate
+frontend on Vercel and point it to a Render API, but that requires CORS and
+frontend API URL configuration.
+
+
+5. PRODUCTION CHECKLIST
+-----------------------
+[ ] Confirm .env is never committed to GitHub.
+[ ] Add GEMINI_API_KEY in Render environment variables.
+[ ] Add RAPIDAPI_KEY in Render if live jobs are desired.
+[ ] Test the deployed home page, a job search, resume upload, and chatbot.
+[ ] Keep the public repository private if it includes sample resumes or other
+    personal material.
