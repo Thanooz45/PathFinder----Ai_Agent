@@ -4,6 +4,7 @@ import uuid
 import asyncio
 import json
 import html
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 
 load_dotenv()
 
@@ -24,13 +27,66 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 STATS_FILE = BASE_DIR / ".search_stats.json"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Pathfinder Career AI", version="1.0.0")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 try:
     search_count = max(0, int(json.loads(STATS_FILE.read_text(encoding="utf-8")).get("search_count", 0)))
 except (OSError, ValueError, json.JSONDecodeError):
     search_count = 0
 search_count_lock = asyncio.Lock()
+mongo_client: AsyncIOMotorClient | None = None
+search_counter_collection = None
+
+
+async def persist_local_search_count() -> None:
+    STATS_FILE.write_text(json.dumps({"search_count": search_count}), encoding="utf-8")
+
+
+async def increment_search_count() -> int:
+    """Atomically increment the shared MongoDB count, with a local fallback."""
+    global search_count
+    async with search_count_lock:
+        if search_counter_collection is not None:
+            try:
+                counter = await search_counter_collection.find_one_and_update(
+                    {"_id": "all_searches"},
+                    {"$inc": {"count": 1}},
+                    upsert=True,
+                    return_document=ReturnDocument.AFTER,
+                )
+                search_count = max(0, int(counter.get("count", 0)))
+                return search_count
+            except Exception:
+                # A temporary database outage should not prevent a job search.
+                pass
+        search_count += 1
+        await persist_local_search_count()
+        return search_count
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global mongo_client, search_counter_collection, search_count
+    uri = os.getenv("MONGODB_URI", "").strip()
+    if uri:
+        try:
+            mongo_client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=3000)
+            await mongo_client.admin.command("ping")
+            database_name = os.getenv("MONGODB_DATABASE", "pathfinder")
+            search_counter_collection = mongo_client[database_name]["counters"]
+            counter = await search_counter_collection.find_one({"_id": "all_searches"})
+            if counter:
+                search_count = max(0, int(counter.get("count", 0)))
+        except Exception:
+            if mongo_client is not None:
+                mongo_client.close()
+            mongo_client = None
+            search_counter_collection = None
+    yield
+    if mongo_client is not None:
+        mongo_client.close()
+
+
+app = FastAPI(title="Pathfinder Career AI", version="1.0.0", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 class SearchRequest(BaseModel):
@@ -343,7 +399,6 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @app.post("/api/search")
 async def search(request: SearchRequest):
-    global search_count
     skill = clean_text(request.skill, 100)
     location = clean_text(request.location, 100)
     # These requests are independent. Running them together makes a mobile
@@ -364,10 +419,7 @@ async def search(request: SearchRequest):
             request.minimum_pay,
         ),
     )
-    async with search_count_lock:
-        search_count += 1
-        current_count = search_count
-        STATS_FILE.write_text(json.dumps({"search_count": current_count}), encoding="utf-8")
+    current_count = await increment_search_count()
     return {
         "advice": advice,
         "jobs": jobs,
